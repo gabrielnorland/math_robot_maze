@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Micro-Robot Maze</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #5ecfce;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: sans-serif;
+    padding: 20px;
+  }
+  .container {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+  }
+  canvas { display: block; border-radius: 8px; }
+  .controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  .compass {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    margin-bottom: 8px;
+  }
+  .compass-n {
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+  }
+  .compass-arrow {
+    position: absolute;
+    top: 50%; left: 50%;
+    font-size: 28px;
+    color: rgba(255,255,255,0.85);
+    transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
+  }
+  .btn {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.85);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    color: #444;
+    transition: background 0.15s, transform 0.1s;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  }
+  .btn:hover { background: white; }
+  .btn:active { transform: scale(0.94); }
+  .btn.grey { background: #b0b0b0; cursor: default; color: #888; }
+  .turn-row { display: flex; gap: 24px; align-items: center; }
+  .reset-btn {
+    margin-top: 8px;
+    padding: 8px 20px;
+    border-radius: 20px;
+    border: none;
+    background: rgba(255,255,255,0.7);
+    cursor: pointer;
+    font-size: 13px;
+    color: #444;
+    letter-spacing: 0.5px;
+    transition: background 0.15s;
+  }
+  .reset-btn:hover { background: rgba(255,255,255,0.95); }
+</style>
+</head>
+<body>
+<div class="container">
+  <canvas id="grid" width="440" height="440"></canvas>
+  <div class="controls">
+    <div class="compass">
+      <span class="compass-n">N</span>
+      <div class="compass-arrow" id="compassArrow" style="transform:translate(-50%,-50%) rotate(0deg);">↑</div>
+    </div>
+    <div class="turn-row">
+      <button class="btn" id="btnLeft" title="Turn 90° anticlockwise">↺</button>
+      <button class="btn" id="btnFwd" title="Move forward">▲</button>
+      <button class="btn" id="btnRight" title="Turn 90° clockwise">↻</button>
+    </div>
+    <button class="reset-btn" id="btnReset">Reset</button>
+  </div>
+</div>
+
+<script>
+const COLS = 8, ROWS = 8, CELL = 55;
+const canvas = document.getElementById('grid');
+const ctx = canvas.getContext('2d');
+const DIRS = ['N','E','S','W'];
+const DIR_ANGLES = {N:0, E:90, S:180, W:270};
+const DIR_DELTA = {N:[0,-1], E:[1,0], S:[0,1], W:[-1,0]};
+let state = { col: 3, row: 3, dir: 'N', animating: false };
+
+function drawScene(cx, cy, dir) {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#7de0de';
+  ctx.roundRect(0,0,canvas.width,canvas.height,10);
+  ctx.fill();
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      ctx.strokeStyle = 'rgba(80,160,158,0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(c*CELL+1, r*CELL+1, CELL-1, CELL-1);
+    }
+  }
+  const rx = (cx + 0.5) * CELL, ry = (cy + 0.5) * CELL;
+  ctx.save();
+  ctx.translate(rx, ry);
+  ctx.rotate(DIR_ANGLES[dir] * Math.PI / 180);
+  const s = 18;
+  ctx.fillStyle = '#f5a623';
+  ctx.beginPath(); ctx.arc(0, 3, s, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-7, -s+4, 6, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(7, -s+4, 6, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawShake() {
+  let t = 0;
+  const offsets = [5,-5,4,-4,3,-2,1,0,0,0];
+  function frame() {
+    drawScene(state.col + (offsets[t]||0)/CELL, state.row, state.dir);
+    t++;
+    if (t < offsets.length) requestAnimationFrame(frame);
+    else { state.animating = false; updateButtons(); drawScene(state.col, state.row, state.dir); }
+  }
+  requestAnimationFrame(frame);
+}
+
+function animateMove(fc, fr, tc, tr) {
+  const start = performance.now(), dur = 350;
+  function frame(now) {
+    const p = Math.min((now - start) / dur, 1);
+    const ease = p < 0.5 ? 2*p*p : -1+(4-2*p)*p;
+    drawScene(fc + (tc-fc)*ease, fr + (tr-fr)*ease, state.dir);
+    if (p < 1) requestAnimationFrame(frame);
+    else { state.animating = false; updateButtons(); }
+  }
+  requestAnimationFrame(frame);
+}
+
+function updateCompass(dir) {
+  const a = document.getElementById('compassArrow');
+  a.style.transform = `translate(-50%,-50%) rotate(${DIR_ANGLES[dir]}deg)`;
+}
+
+function updateButtons() {
+  ['btnLeft','btnRight','btnFwd'].forEach(id => {
+    document.getElementById(id).classList.toggle('grey', state.animating);
+  });
+}
+
+function flash(id) {
+  const b = document.getElementById(id);
+  b.classList.add('grey');
+  setTimeout(() => { if (!state.animating) b.classList.remove('grey'); }, 220);
+}
+
+document.getElementById('btnLeft').onclick = () => {
+  if (state.animating) return;
+  flash('btnLeft');
+  state.dir = DIRS[(DIRS.indexOf(state.dir)+3)%4];
+  updateCompass(state.dir); drawScene(state.col, state.row, state.dir);
+};
+document.getElementById('btnRight').onclick = () => {
+  if (state.animating) return;
+  flash('btnRight');
+  state.dir = DIRS[(DIRS.indexOf(state.dir)+1)%4];
+  updateCompass(state.dir); drawScene(state.col, state.row, state.dir);
+};
+document.getElementById('btnFwd').onclick = () => {
+  if (state.animating) return;
+  const [dc,dr] = DIR_DELTA[state.dir];
+  const nc = state.col+dc, nr = state.row+dr;
+  if (nc<0||nc>=COLS||nr<0||nr>=ROWS) {
+    state.animating = true; updateButtons(); drawShake(); return;
+  }
+  state.animating = true; updateButtons();
+  const fc = state.col, fr = state.row;
+  state.col = nc; state.row = nr;
+  animateMove(fc, fr, nc, nr);
+};
+document.getElementById('btnReset').onclick = () => {
+  state = { col:3, row:3, dir:'N', animating:false };
+  updateCompass('N'); drawScene(3,3,'N'); updateButtons();
+};
+
+drawScene(3,3,'N'); updateCompass('N');
+</script>
+</body>
+</html>
+
+<!-- ============================================================
+     GENIALLY EMBED — paste the iframe below into your slide.
+     Host micro_robot_maze_inner.html on a web server or CDN,
+     then replace the src URL accordingly.
+     ============================================================ -->
+
+<!--
+<iframe
+  src="YOUR_HOSTED_URL/micro_robot_maze.html"
+  width="640"
+  height="520"
+  frameborder="0"
+  scrolling="no"
+  allowfullscreen
+  style="border:none; border-radius:12px;">
+</iframe>
+-->
