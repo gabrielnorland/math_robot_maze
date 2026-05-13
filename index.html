@@ -17,12 +17,12 @@
   }
   .container { display: flex; align-items: center; gap: 40px; }
   canvas { display: block; border-radius: 8px; }
-  .controls { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .controls { display: flex; flex-direction: column; align-items: center; gap: 14px; }
   .compass {
     position: relative;
     width: 90px;
     height: 90px;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
   .compass-label {
     position: absolute;
@@ -30,12 +30,7 @@
     color: rgba(255,255,255,0.8);
     line-height: 1;
   }
-  .compass-label.n {
-    top: 0; left: 50%;
-    transform: translateX(-50%);
-    font-weight: 700;
-    color: rgba(255,255,255,1);
-  }
+  .compass-label.n { top: 0; left: 50%; transform: translateX(-50%); font-weight: 700; color: rgba(255,255,255,1); }
   .compass-label.s { bottom: 0; left: 50%; transform: translateX(-50%); }
   .compass-label.w { left: 0; top: 50%; transform: translateY(-50%); }
   .compass-label.e { right: 0; top: 50%; transform: translateY(-50%); }
@@ -62,19 +57,26 @@
   .btn:active { transform: scale(0.94); }
   .btn.grey { background: #b0b0b0; cursor: default; color: #888; }
   .turn-row { display: flex; gap: 24px; align-items: center; }
-  .reset-btn {
-    margin-top: 8px;
-    padding: 8px 20px;
-    border-radius: 20px;
+  .mode-btn {
+    width: 110px;
+    padding: 9px 0;
+    border-radius: 22px;
     border: none;
-    background: rgba(255,255,255,0.7);
+    background: rgba(255,255,255,0.75);
     cursor: pointer;
     font-size: 13px;
     color: #444;
-    letter-spacing: 0.5px;
-    transition: background 0.15s;
+    letter-spacing: 0.3px;
+    transition: background 0.15s, box-shadow 0.15s;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
   }
-  .reset-btn:hover { background: rgba(255,255,255,0.95); }
+  .mode-btn:hover { background: rgba(255,255,255,0.95); }
+  .mode-btn.active {
+    background: rgba(255,255,255,0.95);
+    box-shadow: 0 0 0 2px rgba(80,160,158,0.7), 0 2px 6px rgba(0,0,0,0.1);
+    color: #2a8a88;
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
@@ -93,7 +95,9 @@
       <button class="btn" id="btnFwd" title="Move forward">▲</button>
       <button class="btn" id="btnRight" title="Turn 90° clockwise">↻</button>
     </div>
-    <button class="reset-btn" id="btnReset">Reset</button>
+    <button class="mode-btn" id="btnBacteria">bacteria</button>
+    <button class="mode-btn" id="btnWalls">walls</button>
+    <button class="mode-btn" id="btnReset">reset</button>
   </div>
 </div>
 
@@ -103,11 +107,185 @@ const canvas = document.getElementById('grid');
 const ctx = canvas.getContext('2d');
 const DIRS = ['N','E','S','W'];
 const DIR_DELTA = {N:[0,-1], E:[1,0], S:[0,1], W:[-1,0]};
+const dirAngles = {N:0, E:90, S:180, W:270};
 
 let state = { col: 3, row: 3, dir: 'N', animating: false };
 let compassDeg = 0;
+let bacteriaOn = false;
+let wallsOn = false;
+let bacteria = null;
 
-function drawScene(cx, cy, dir) {
+// Walls stored as sets of collinear segments grouped into runs for clean drawing.
+// Each wall edge stored as a canonical string "c1,r1,c2,r2" (smaller coord first).
+let wallSet = new Set();
+
+function wallKey(c1, r1, c2, r2) {
+  // canonical: smaller col/row first within same axis
+  if (c1 === c2) return r1 < r2 ? `${c1},${r1},${c2},${r2}` : `${c2},${r2},${c1},${r1}`;
+  return c1 < c2 ? `${c1},${r1},${c2},${r2}` : `${c2},${r2},${c1},${r1}`;
+}
+
+function addWall(c1, r1, c2, r2) {
+  wallSet.add(wallKey(c1, r1, c2, r2));
+}
+
+function isWalled(fc, fr, tc, tr) {
+  return wallSet.has(wallKey(fc, fr, tc, tr));
+}
+
+// --- Wall generation: organic growth ---
+function generateWalls() {
+  wallSet = new Set();
+  const numRuns = 4 + Math.floor(Math.random() * 4); // 4-7 runs
+
+  for (let i = 0; i < numRuns; i++) {
+    // pick random start cell and direction (H or V)
+    const horiz = Math.random() < 0.5;
+    const length = 3 + Math.floor(Math.random() * 5); // 3-7 cells long
+
+    let startC, startR;
+    if (horiz) {
+      // horizontal run: wall runs along a row boundary (between row r and r+1)
+      // so we need a row boundary (0 < r < ROWS) and startCol
+      startC = Math.floor(Math.random() * COLS);
+      startR = 1 + Math.floor(Math.random() * (ROWS - 2)); // boundary row 1..6
+    } else {
+      startC = 1 + Math.floor(Math.random() * (COLS - 2)); // boundary col 1..6
+      startR = Math.floor(Math.random() * ROWS);
+    }
+
+    for (let step = 0; step < length; step++) {
+      if (horiz) {
+        const c = startC + step;
+        if (c >= COLS) break;
+        // wall between (c, startR-1) and (c, startR)
+        const r1 = startR - 1, r2 = startR;
+        // don't wall off robot start
+        if ((c===3&&r1===3)||(c===3&&r2===3)) continue;
+        addWall(c, r1, c, r2);
+      } else {
+        const r = startR + step;
+        if (r >= ROWS) break;
+        // wall between (startC-1, r) and (startC, r)
+        const c1 = startC - 1, c2 = startC;
+        if ((c1===3&&r===3)||(c2===3&&r===3)) continue;
+        addWall(c1, r, c2, r);
+      }
+    }
+  }
+}
+
+// --- Draw walls as continuous lines ---
+// Group edges into collinear runs and draw each run as a single path
+function drawWalls() {
+  // Separate horizontal edges (same col, adjacent rows) and vertical edges (same row, adjacent cols)
+  const hEdges = []; // {c, rTop} meaning between (c,rTop) and (c,rTop+1)
+  const vEdges = []; // {cLeft, r} meaning between (cLeft,r) and (cLeft+1,r)
+
+  for (const key of wallSet) {
+    const [c1, r1, c2, r2] = key.split(',').map(Number);
+    if (c1 === c2) {
+      hEdges.push({c: c1, rTop: Math.min(r1, r2)});
+    } else {
+      vEdges.push({cLeft: Math.min(c1, c2), r: r1});
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(45,105,103,0.9)';
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Draw horizontal runs: group hEdges by rTop, sort by c, find consecutive runs
+  const hByRow = {};
+  hEdges.forEach(e => {
+    if (!hByRow[e.rTop]) hByRow[e.rTop] = [];
+    hByRow[e.rTop].push(e.c);
+  });
+  for (const rTop in hByRow) {
+    const cols = hByRow[rTop].sort((a,b) => a-b);
+    const y = (Number(rTop) + 1) * CELL; // pixel y of the boundary
+    let runStart = cols[0];
+    for (let i = 1; i <= cols.length; i++) {
+      const consecutive = i < cols.length && cols[i] === cols[i-1] + 1;
+      if (!consecutive) {
+        // draw run from runStart to cols[i-1]
+        ctx.beginPath();
+        ctx.moveTo(runStart * CELL, y);
+        ctx.lineTo((cols[i-1] + 1) * CELL, y);
+        ctx.stroke();
+        if (i < cols.length) runStart = cols[i];
+      }
+    }
+  }
+
+  // Draw vertical runs: group vEdges by cLeft, sort by r, find consecutive runs
+  const vByCol = {};
+  vEdges.forEach(e => {
+    if (!vByCol[e.cLeft]) vByCol[e.cLeft] = [];
+    vByCol[e.cLeft].push(e.r);
+  });
+  for (const cLeft in vByCol) {
+    const rows = vByCol[cLeft].sort((a,b) => a-b);
+    const x = (Number(cLeft) + 1) * CELL;
+    let runStart = rows[0];
+    for (let i = 1; i <= rows.length; i++) {
+      const consecutive = i < rows.length && rows[i] === rows[i-1] + 1;
+      if (!consecutive) {
+        ctx.beginPath();
+        ctx.moveTo(x, runStart * CELL);
+        ctx.lineTo(x, (rows[i-1] + 1) * CELL);
+        ctx.stroke();
+        if (i < rows.length) runStart = rows[i];
+      }
+    }
+  }
+}
+
+// --- Bacteria ---
+function placeBacteria() {
+  const edge = [];
+  for (let c = 0; c < COLS; c++) { edge.push({col:c,row:0}); edge.push({col:c,row:ROWS-1}); }
+  for (let r = 1; r < ROWS-1; r++) { edge.push({col:0,row:r}); edge.push({col:COLS-1,row:r}); }
+  const options = edge.filter(p => !(p.col===3 && p.row===3));
+  bacteria = options[Math.floor(Math.random() * options.length)];
+}
+
+function drawBacteria(col, row, scale) {
+  const cx = (col + 0.5) * CELL;
+  const cy = (row + 0.5) * CELL;
+  const r = 10 * (scale || 1);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.fillStyle = '#b07cc6';
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#9a5fb5';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI * 2;
+    const inner = r;
+    const outer = r + 4 * (scale || 1);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle)*inner, Math.sin(angle)*inner);
+    ctx.lineTo(Math.cos(angle)*outer, Math.sin(angle)*outer);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawRobot(cx, cy, dir, scale) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(dirAngles[dir] * Math.PI / 180);
+  const s = 18 * (scale || 1);
+  ctx.fillStyle = '#f5a623';
+  ctx.beginPath(); ctx.arc(0, 3*(scale||1), s, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-7*(scale||1), -s+4*(scale||1), 6*(scale||1), 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(7*(scale||1), -s+4*(scale||1), 6*(scale||1), 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawBase() {
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.fillStyle = '#7de0de';
   ctx.roundRect(0,0,canvas.width,canvas.height,10);
@@ -119,19 +297,16 @@ function drawScene(cx, cy, dir) {
       ctx.strokeRect(c*CELL+1, r*CELL+1, CELL-1, CELL-1);
     }
   }
-  const rx = (cx + 0.5) * CELL, ry = (cy + 0.5) * CELL;
-  ctx.save();
-  ctx.translate(rx, ry);
-  const dirAngles = {N:0, E:90, S:180, W:270};
-  ctx.rotate(dirAngles[dir] * Math.PI / 180);
-  const s = 18;
-  ctx.fillStyle = '#f5a623';
-  ctx.beginPath(); ctx.arc(0, 3, s, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(-7, -s+4, 6, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(7, -s+4, 6, 0, Math.PI*2); ctx.fill();
-  ctx.restore();
+  if (wallsOn && wallSet.size) drawWalls();
+  if (bacteriaOn && bacteria) drawBacteria(bacteria.col, bacteria.row, 1);
 }
 
+function drawScene(cx, cy, dir, robotScale) {
+  drawBase();
+  drawRobot((cx+0.5)*CELL, (cy+0.5)*CELL, dir, robotScale||1);
+}
+
+// --- Animations ---
 function drawShake() {
   let t = 0;
   const offsets = [5,-5,4,-4,3,-2,1,0,0,0];
@@ -144,22 +319,49 @@ function drawShake() {
   requestAnimationFrame(frame);
 }
 
+function animateEat(col, row) {
+  const start = performance.now(), dur = 400;
+  function frame(now) {
+    const p = Math.min((now - start) / dur, 1);
+    const scale = p < 0.5 ? 1 + 0.6*(p/0.5) : 1 + 0.6*(1-(p-0.5)/0.5);
+    drawBase();
+    if (p < 0.5) drawBacteria(col, row, 1 - p*2*0.8);
+    drawRobot((col+0.5)*CELL, (row+0.5)*CELL, state.dir, scale);
+    if (p < 1) requestAnimationFrame(frame);
+    else {
+      bacteria = null;
+      state.animating = false;
+      updateButtons();
+      drawScene(state.col, state.row, state.dir);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
 function animateMove(fc, fr, tc, tr) {
   const start = performance.now(), dur = 350;
   function frame(now) {
     const p = Math.min((now - start) / dur, 1);
     const ease = p < 0.5 ? 2*p*p : -1+(4-2*p)*p;
-    drawScene(fc + (tc-fc)*ease, fr + (tr-fr)*ease, state.dir);
-    if (p < 1) requestAnimationFrame(frame);
-    else { state.animating = false; updateButtons(); }
+    drawScene(fc+(tc-fc)*ease, fr+(tr-fr)*ease, state.dir);
+    if (p < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      if (bacteriaOn && bacteria && state.col===bacteria.col && state.row===bacteria.row) {
+        animateEat(state.col, state.row);
+      } else {
+        state.animating = false;
+        updateButtons();
+      }
+    }
   }
   requestAnimationFrame(frame);
 }
 
+// --- UI helpers ---
 function updateCompass(delta) {
   compassDeg += delta;
-  const arrow = document.getElementById('compassArrow');
-  arrow.style.transform = `translate(-50%,-50%) rotate(${compassDeg}deg)`;
+  document.getElementById('compassArrow').style.transform = `translate(-50%,-50%) rotate(${compassDeg}deg)`;
 }
 
 function updateButtons() {
@@ -173,6 +375,34 @@ function flash(id) {
   b.classList.add('grey');
   setTimeout(() => { if (!state.animating) b.classList.remove('grey'); }, 220);
 }
+
+function doReset() {
+  state = { col:3, row:3, dir:'N', animating:false };
+  compassDeg = 0;
+  const arrow = document.getElementById('compassArrow');
+  arrow.style.transition = 'none';
+  arrow.style.transform = 'translate(-50%,-50%) rotate(0deg)';
+  setTimeout(() => { arrow.style.transition = 'transform 0.4s cubic-bezier(0.4,0,0.2,1)'; }, 50);
+  if (bacteriaOn) placeBacteria(); else bacteria = null;
+  if (wallsOn) generateWalls(); else wallSet = new Set();
+  drawScene(3, 3, 'N');
+  updateButtons();
+}
+
+// --- Event listeners ---
+document.getElementById('btnBacteria').onclick = () => {
+  bacteriaOn = !bacteriaOn;
+  document.getElementById('btnBacteria').classList.toggle('active', bacteriaOn);
+  if (bacteriaOn) placeBacteria(); else bacteria = null;
+  drawScene(state.col, state.row, state.dir);
+};
+
+document.getElementById('btnWalls').onclick = () => {
+  wallsOn = !wallsOn;
+  document.getElementById('btnWalls').classList.toggle('active', wallsOn);
+  if (wallsOn) generateWalls(); else wallSet = new Set();
+  drawScene(state.col, state.row, state.dir);
+};
 
 document.getElementById('btnLeft').onclick = () => {
   if (state.animating) return;
@@ -197,25 +427,18 @@ document.getElementById('btnFwd').onclick = () => {
   if (nc<0||nc>=COLS||nr<0||nr>=ROWS) {
     state.animating = true; updateButtons(); drawShake(); return;
   }
+  if (wallsOn && isWalled(state.col, state.row, nc, nr)) {
+    state.animating = true; updateButtons(); drawShake(); return;
+  }
   state.animating = true; updateButtons();
   const fc = state.col, fr = state.row;
   state.col = nc; state.row = nr;
   animateMove(fc, fr, nc, nr);
 };
 
-document.getElementById('btnReset').onclick = () => {
-  state = { col:3, row:3, dir:'N', animating:false };
-  compassDeg = 0;
-  const arrow = document.getElementById('compassArrow');
-  arrow.style.transition = 'none';
-  arrow.style.transform = 'translate(-50%,-50%) rotate(0deg)';
-  setTimeout(() => {
-    arrow.style.transition = 'transform 0.4s cubic-bezier(0.4,0,0.2,1)';
-  }, 50);
-  drawScene(3,3,'N'); updateButtons();
-};
+document.getElementById('btnReset').onclick = doReset;
 
-drawScene(3,3,'N');
+drawScene(3, 3, 'N');
 </script>
 </body>
 </html>
