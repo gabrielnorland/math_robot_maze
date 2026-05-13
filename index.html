@@ -15,37 +15,35 @@
     font-family: sans-serif;
     padding: 20px;
   }
-  .container {
-    display: flex;
-    align-items: center;
-    gap: 40px;
-  }
+  .container { display: flex; align-items: center; gap: 40px; }
   canvas { display: block; border-radius: 8px; }
-  .controls {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-  }
+  .controls { display: flex; flex-direction: column; align-items: center; gap: 16px; }
   .compass {
     position: relative;
-    width: 80px;
-    height: 80px;
+    width: 90px;
+    height: 90px;
     margin-bottom: 8px;
   }
-  .compass-n {
+  .compass-label {
     position: absolute;
+    font-size: 12px;
+    color: rgba(255,255,255,0.8);
+    line-height: 1;
+  }
+  .compass-label.n {
     top: 0; left: 50%;
     transform: translateX(-50%);
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(255,255,255,0.7);
+    font-weight: 700;
+    color: rgba(255,255,255,1);
   }
+  .compass-label.s { bottom: 0; left: 50%; transform: translateX(-50%); }
+  .compass-label.w { left: 0; top: 50%; transform: translateY(-50%); }
+  .compass-label.e { right: 0; top: 50%; transform: translateY(-50%); }
   .compass-arrow {
     position: absolute;
     top: 50%; left: 50%;
     font-size: 28px;
-    color: rgba(255,255,255,0.85);
+    color: rgba(255,255,255,0.9);
     transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
   }
   .btn {
@@ -84,7 +82,10 @@
   <canvas id="grid" width="440" height="440"></canvas>
   <div class="controls">
     <div class="compass">
-      <span class="compass-n">N</span>
+      <span class="compass-label n">N</span>
+      <span class="compass-label s">S</span>
+      <span class="compass-label w">W</span>
+      <span class="compass-label e">E</span>
       <div class="compass-arrow" id="compassArrow" style="transform:translate(-50%,-50%) rotate(0deg);">↑</div>
     </div>
     <div class="turn-row">
@@ -101,9 +102,10 @@ const COLS = 8, ROWS = 8, CELL = 55;
 const canvas = document.getElementById('grid');
 const ctx = canvas.getContext('2d');
 const DIRS = ['N','E','S','W'];
-const DIR_ANGLES = {N:0, E:90, S:180, W:270};
 const DIR_DELTA = {N:[0,-1], E:[1,0], S:[0,1], W:[-1,0]};
+
 let state = { col: 3, row: 3, dir: 'N', animating: false };
+let compassDeg = 0;
 
 function drawScene(cx, cy, dir) {
   ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -120,7 +122,8 @@ function drawScene(cx, cy, dir) {
   const rx = (cx + 0.5) * CELL, ry = (cy + 0.5) * CELL;
   ctx.save();
   ctx.translate(rx, ry);
-  ctx.rotate(DIR_ANGLES[dir] * Math.PI / 180);
+  const dirAngles = {N:0, E:90, S:180, W:270};
+  ctx.rotate(dirAngles[dir] * Math.PI / 180);
   const s = 18;
   ctx.fillStyle = '#f5a623';
   ctx.beginPath(); ctx.arc(0, 3, s, 0, Math.PI*2); ctx.fill();
@@ -153,9 +156,10 @@ function animateMove(fc, fr, tc, tr) {
   requestAnimationFrame(frame);
 }
 
-function updateCompass(dir) {
-  const a = document.getElementById('compassArrow');
-  a.style.transform = `translate(-50%,-50%) rotate(${DIR_ANGLES[dir]}deg)`;
+function updateCompass(delta) {
+  compassDeg += delta;
+  const arrow = document.getElementById('compassArrow');
+  arrow.style.transform = `translate(-50%,-50%) rotate(${compassDeg}deg)`;
 }
 
 function updateButtons() {
@@ -174,14 +178,18 @@ document.getElementById('btnLeft').onclick = () => {
   if (state.animating) return;
   flash('btnLeft');
   state.dir = DIRS[(DIRS.indexOf(state.dir)+3)%4];
-  updateCompass(state.dir); drawScene(state.col, state.row, state.dir);
+  updateCompass(-90);
+  drawScene(state.col, state.row, state.dir);
 };
+
 document.getElementById('btnRight').onclick = () => {
   if (state.animating) return;
   flash('btnRight');
   state.dir = DIRS[(DIRS.indexOf(state.dir)+1)%4];
-  updateCompass(state.dir); drawScene(state.col, state.row, state.dir);
+  updateCompass(+90);
+  drawScene(state.col, state.row, state.dir);
 };
+
 document.getElementById('btnFwd').onclick = () => {
   if (state.animating) return;
   const [dc,dr] = DIR_DELTA[state.dir];
@@ -194,30 +202,20 @@ document.getElementById('btnFwd').onclick = () => {
   state.col = nc; state.row = nr;
   animateMove(fc, fr, nc, nr);
 };
+
 document.getElementById('btnReset').onclick = () => {
   state = { col:3, row:3, dir:'N', animating:false };
-  updateCompass('N'); drawScene(3,3,'N'); updateButtons();
+  compassDeg = 0;
+  const arrow = document.getElementById('compassArrow');
+  arrow.style.transition = 'none';
+  arrow.style.transform = 'translate(-50%,-50%) rotate(0deg)';
+  setTimeout(() => {
+    arrow.style.transition = 'transform 0.4s cubic-bezier(0.4,0,0.2,1)';
+  }, 50);
+  drawScene(3,3,'N'); updateButtons();
 };
 
-drawScene(3,3,'N'); updateCompass('N');
+drawScene(3,3,'N');
 </script>
 </body>
 </html>
-
-<!-- ============================================================
-     GENIALLY EMBED — paste the iframe below into your slide.
-     Host micro_robot_maze_inner.html on a web server or CDN,
-     then replace the src URL accordingly.
-     ============================================================ -->
-
-<!--
-<iframe
-  src="YOUR_HOSTED_URL/micro_robot_maze.html"
-  width="640"
-  height="520"
-  frameborder="0"
-  scrolling="no"
-  allowfullscreen
-  style="border:none; border-radius:12px;">
-</iframe>
--->
